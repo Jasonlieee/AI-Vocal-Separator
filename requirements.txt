@@ -1,0 +1,10 @@
+
+fastapi
+uvicorn
+python-multipart
+demucs
+torchaudio
+torch
+numpy
+soundfile
+noisereduce

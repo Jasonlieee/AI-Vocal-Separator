@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI人声伴奏分离器</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Starfield Effect -->
+    <canvas class="stars" id="starsCanvas"></canvas>
+
+    <div class="toast" id="toast"></div>
+
+    <div class="window-container">
+        <!-- Navigation Bar -->
+        <div class="nav-bar">
+            <div class="logo-section">
+                <span class="logo-icon">⏯</span>
+                <span class="logo-text">AI人声伴奏分离器</span>
+            </div>
+            <div class="nav-links">
+                <a class="nav-link active" onclick="switchMainView('home')" data-view="home">首页</a>
+                <a class="nav-link" onclick="switchMainView('features')" data-view="features">功能</a>
+                <a class="nav-link" onclick="switchMainViewWithLoad('library')" data-view="library">素材库</a>
+                <a class="nav-link" onclick="switchMainViewWithLoad('filemanager')" data-view="filemanager">文件管理</a>
+                <a class="nav-link" onclick="switchMainView('pricing')" data-view="pricing">价格</a>
+                <a class="nav-link" onclick="switchMainView('about')" data-view="about">关于</a>
+            </div>
+            <div class="nav-right">
+                <button class="settings-btn" onclick="switchMainView('settings')">
+                    <span>⚙️</span>
+                    <span>设置</span>
+                </button>
+                <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换主题">🌙</button>
+                        <div class="user-avatar" onclick="switchMainView('profile')">👤</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Home Page -->
+            <div class="page-view active" id="homePage">
+                <div class="upload-view" id="uploadView">
+                    <div class="file-info hidden" id="fileInfo">
+                        <span>📄</span>
+                        <span class="file-name" id="fileName">歌曲.mp3</span>
+                        <span class="file-size" id="fileSize">(8.4 MB)</span>
+                        <button class="btn-remove" onclick="clearFile()">移除</button>
+                    </div>
+
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-text">拖拽音频文件到此处</div>
+                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC 格式，最大 50MB</div>
+                    </div>
+                    <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac" style="display: none;">
+
+                    <div class="conversion-options" id="conversionOptions">
+                        <div class="option-group">
+                            <label class="option-label">输出格式：</label>
+                            <select id="outputFormat" class="format-select">
+                                <option value="mp3">MP3 (推荐)</option>
+                                <option value="wav">WAV (无损)</option>
+                                <option value="flac">FLAC (无损)</option>
+                                <option value="ogg">OGG</option>
+                                <option value="aac">AAC</option>
+                                <option value="wma">WMA</option>
+                            </select>
+                        </div>
+                        <div class="option-group">
+                            <label class="option-label">处理模式：</label>
+                            <select id="processMode" class="format-select">
+                                <option value="separate">仅分离音频</option>
+                                <option value="convert">仅转换格式</option>
+                                <option value="convert-and-separate">转换格式 + 分离</option>
+                                <option value="enhance">一键提升音质</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-separate" id="separateBtn" onclick="startProcessing()">开始处理</button>
+                        <button class="btn-convert" id="convertBtn" onclick="startConversion()" style="display: none;">转换格式</button>
+                        <button class="btn-enhance" id="enhanceBtn" onclick="startEnhancement()" style="display: none;">一键提升音质</button>
+                    </div>
+
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span class="progress-text" id="progressText">0%</span>
+                    </div>
+                </div>
+
+                <!-- Processing View -->
+                <div class="processing-view hidden" id="processingView">
+                    <div class="processing-spinner"></div>
+                    <div class="processing-text">AI正在分离您的音频...</div>
+                    <div class="processing-subtext">请稍候，这可能需要几分钟</div>
+                </div>
+
+                <!-- Player View -->
+                <div class="player-view hidden" id="playerView">
+                    <div class="track-card">
+                        <div class="track-header">
+                            <div class="track-title">
+                                <div class="track-icon">🎤</div>
+                                <div class="track-name">人声轨道</div>
+                            </div>
+                            <div class="track-controls">
+                                <button class="btn-download" onclick="downloadTrack('vocals')">⬇️ 下载</button>
+                                <button class="btn-mute" id="muteVocals" onclick="toggleMute('vocals')">M</button>
+                                <button class="btn-solo" id="soloVocals" onclick="toggleSolo('vocals')">S</button>
+                            </div>
+                        </div>
+                        <div class="track-content">
+                            <div class="volume-control">
+                                <input type="range" class="volume-slider" min="0" max="100" value="80" id="volumeVocals">
+                                <span>🔊</span>
+                            </div>
+                            <div class="waveform-container" id="waveformVocals" onclick="seekWaveform('vocals', event)">
+                                <canvas class="waveform-canvas" id="canvasVocals"></canvas>
+                                <div class="waveform-progress" id="progressVocals"></div>
+                                <div class="waveform-playhead" id="playheadVocals"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="track-card">
+                        <div class="track-header">
+                            <div class="track-title">
+                                <div class="track-icon">🥁</div>
+                                <div class="track-name">鼓组轨道</div>
+                            </div>
+                            <div class="track-controls">
+                                <button class="btn-download" onclick="downloadTrack('drums')">⬇️ 下载</button>
+                                <button class="btn-mute" id="muteDrums" onclick="toggleMute('drums')">M</button>
+                                <button class="btn-solo" id="soloDrums" onclick="toggleSolo('drums')">S</button>
+                            </div>
+                        </div>
+                        <div class="track-content">
+                            <div class="volume-control">
+                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeDrums">
+                                <span>🔊</span>
+                            </div>
+                            <div class="waveform-container" id="waveformDrums" onclick="seekWaveform('drums', event)">
+                                <canvas class="waveform-canvas" id="canvasDrums"></canvas>
+                                <div class="waveform-progress" id="progressDrums"></div>
+                                <div class="waveform-playhead" id="playheadDrums"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="track-card">
+                        <div class="track-header">
+                            <div class="track-title">
+                                <div class="track-icon">🎸</div>
+                                <div class="track-name">贝斯轨道</div>
+                            </div>
+                            <div class="track-controls">
+                                <button class="btn-download" onclick="downloadTrack('bass')">⬇️ 下载</button>
+                                <button class="btn-mute" id="muteBass" onclick="toggleMute('bass')">M</button>
+                                <button class="btn-solo" id="soloBass" onclick="toggleSolo('bass')">S</button>
+                            </div>
+                        </div>
+                        <div class="track-content">
+                            <div class="volume-control">
+                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeBass">
+                                <span>🔊</span>
+                            </div>
+                            <div class="waveform-container" id="waveformBass" onclick="seekWaveform('bass', event)">
+                                <canvas class="waveform-canvas" id="canvasBass"></canvas>
+                                <div class="waveform-progress" id="progressBass"></div>
+                                <div class="waveform-playhead" id="playheadBass"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="track-card">
+                        <div class="track-header">
+                            <div class="track-title">
+                                <div class="track-icon">🎵</div>
+                                <div class="track-name">其他轨道</div>
+                            </div>
+                            <div class="track-controls">
+                                <button class="btn-download" onclick="downloadTrack('other')">⬇️ 下载</button>
+                                <button class="btn-mute" id="muteOther" onclick="toggleMute('other')">M</button>
+                                <button class="btn-solo" id="soloOther" onclick="toggleSolo('other')">S</button>
+                            </div>
+                        </div>
+                        <div class="track-content">
+                            <div class="volume-control">
+                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeOther">
+                                <span>🔊</span>
+                            </div>
+                            <div class="waveform-container" id="waveformOther" onclick="seekWaveform('other', event)">
+                                <canvas class="waveform-canvas" id="canvasOther"></canvas>
+                                <div class="waveform-progress" id="progressOther"></div>
+                                <div class="waveform-playhead" id="playheadOther"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Timeline -->
+                    <div class="timeline-container" id="timeline">
+                        <div class="timeline-markers" id="timelineMarkers"></div>
+                        <div class="timeline-track">
+                            <div class="timeline-fill" id="timelineFill"></div>
+                        </div>
+                        <div class="timeline-handle" id="timelineHandle"></div>
+                        <div class="timeline-time" id="timelineTime">0:00 / 0:00</div>
+                    </div>
+
+                    <!-- Playback Controls -->
+                    <div style="display: flex; justify-content: center; gap: 18px; margin-bottom: 20px; margin-top: 24px;">
+                        <button class="player-footer-btn" onclick="skipBackward()">⏮️ 后退10秒</button>
+                        <button class="player-footer-btn" onclick="stopAllAudio()">⏹️ 停止</button>
+                        <button class="player-footer-btn btn-primary" id="playPauseBtn" onclick="togglePlayPause()">▶️ 播放</button>
+                        <button class="player-footer-btn" onclick="skipForward()">⏭️ 前进10秒</button>
+                    </div>
+
+                    <div class="player-footer">
+                        <div style="display: flex; gap: 11px;">
+                            <button class="player-footer-btn" onclick="resetApp()">🔄 重新开始</button>
+                            <div class="status-badge">
+                                <span class="status-dot"></span>
+                                <span>处理完成</span>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 11px;">
+                            <button class="btn-add-library" id="addToLibraryBtn" onclick="addToLibrary()">⭐ 收入素材库</button>
+                            <button class="player-footer-btn" onclick="switchMainView('settings')">⚙️ 设置</button>
+                            <button class="player-footer-btn btn-primary" onclick="downloadAll()">📤 全部导出</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Enhancer Player View -->
+                <div class="enhancer-player-view hidden" id="enhancerPlayerView">
+                    <div class="enhancer-header">
+                        <div class="enhancer-title">🎵 音质提升对比</div>
+                        <div class="enhancer-filename" id="enhancerFilename">文件名.mp3</div>
+                    </div>
+
+                    <div class="enhancer-controls">
+                        <div class="enhancer-version-selector">
+                            <button class="version-btn active" id="btnEnhanced" onclick="switchEnhancerVersion('enhanced')">
+                                ✨ 增强版
+                            </button>
+                            <button class="version-btn" id="btnOriginal" onclick="switchEnhancerVersion('original')">
+                                📀 原始版
+                            </button>
+                        </div>
+                        <div class="enhancer-status" id="enhancerStatus">当前播放：增强版</div>
+                    </div>
+
+                    <div class="enhancer-waveform">
+                        <div class="waveform-container" id="waveformEnhancer" onclick="seekEnhancerWaveform(event)">
+                            <canvas class="waveform-canvas" id="canvasEnhancer"></canvas>
+                            <div class="waveform-progress" id="progressEnhancer"></div>
+                            <div class="waveform-playhead" id="playheadEnhancer"></div>
+                        </div>
+                        <div class="enhancer-time" id="enhancerTime">0:00 / 0:00</div>
+                    </div>
+
+                    <div class="enhancer-playback-controls">
+                        <button class="player-footer-btn" onclick="skipEnhancerBackward()">⏮️ 后退10秒</button>
+                        <button class="player-footer-btn" onclick="stopEnhancerAudio()">⏹️ 停止</button>
+                        <button class="player-footer-btn btn-primary" id="enhancerPlayPauseBtn" onclick="toggleEnhancerPlayPause()">▶️ 播放</button>
+                        <button class="player-footer-btn" onclick="skipEnhancerForward()">⏭️ 前进10秒</button>
+                    </div>
+
+                    <div class="enhancer-footer">
+                        <div style="display: flex; gap: 11px;">
+                            <button class="player-footer-btn" onclick="resetApp()">🔄 重新开始</button>
+                            <button class="player-footer-btn" onclick="downloadEnhanced()">⬇️ 下载增强版</button>
+                        </div>
+                        <div style="display: flex; gap: 11px;">
+                            <button class="player-footer-btn btn-primary" id="enhancerSeparateBtn" onclick="startEnhancerSeparation()">
+                                🔀 分轨处理
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Features Page -->
+            <div class="page-view" id="featuresPage">
+                <div class="page-title">强大功能</div>
+                <div class="page-subtitle">探索我们AI人声伴奏分离器的所有功能</div>
+                <div class="page-content">
+                    <div class="feature-cards">
+                        <div class="feature-card" onclick="switchMainView('home')">
+                            <div class="feature-icon">⚡</div>
+                            <div class="feature-title">快速分离</div>
+                            <div class="feature-desc">先进的AI算法，只需几秒即可完成高质量的人声与伴奏分离</div>
+                        </div>
+                        <div class="feature-card" onclick="switchMainView('batch')">
+                            <div class="feature-icon">🎵</div>
+                            <div class="feature-title">批量处理</div>
+                            <div class="feature-desc">支持同时处理多个音频文件，大幅提升工作效率</div>
+                        </div>
+                        <div class="feature-card" onclick="showToast('高级模式正在开发中，敬请期待')">
+                            <div class="feature-icon">🎨</div>
+                            <div class="feature-title">高级模式</div>
+                            <div class="feature-desc">提供多种分离模式，满足不同场景的专业需求</div>
+                        </div>
+                        <div class="feature-card" onclick="showToast('云端存储正在开发中，敬请期待')">
+                            <div class="feature-icon">☁️</div>
+                            <div class="feature-title">云端存储</div>
+                            <div class="feature-desc">自动保存处理历史，随时随地访问您的文件</div>
+                        </div>
+                        <div class="feature-card" onclick="switchMainView('home')">
+                            <div class="feature-icon">🔊</div>
+                            <div class="feature-title">实时预览</div>
+                            <div class="feature-desc">内置播放器，分离完成后立即试听效果</div>
+                        </div>
+                        <div class="feature-card" onclick="switchMainView('home')">
+                            <div class="feature-icon">📦</div>
+                            <div class="feature-title">多格式输出</div>
+                            <div class="feature-desc">支持 MP3、WAV、FLAC 等多种音频格式导出</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pricing Page -->
+            <div class="page-view" id="pricingPage">
+                <div class="page-title">选择方案</div>
+                <div class="page-subtitle">找到最适合您的定价方案</div>
+                <div class="page-content">
+                    <div class="pricing-plans">
+                        <div class="pricing-plan">
+                            <div class="plan-name">免费版</div>
+                            <div class="plan-price">¥0</div>
+                            <div class="plan-period">每天3次</div>
+                            <ul class="plan-features">
+                                <li>基础分离质量</li>
+                                <li>单文件处理</li>
+                                <li>MP3格式输出</li>
+                                <li>最大10MB文件</li>
+                            </ul>
+                            <button class="plan-btn" onclick="switchMainView('home')">立即开始</button>
+                        </div>
+                        <div class="pricing-plan featured">
+                            <div class="plan-name">专业版</div>
+                            <div class="plan-price">¥29</div>
+                            <div class="plan-period">包月无限</div>
+                            <ul class="plan-features">
+                                <li>高清分离质量</li>
+                                <li>批量文件处理</li>
+                                <li>多格式输出</li>
+                                <li>最大100MB文件</li>
+                                <li>云端存储</li>
+                                <li>优先客服支持</li>
+                            </ul>
+                            <button class="plan-btn" onclick="switchMainView('home')">立即订阅</button>
+                        </div>
+                        <div class="pricing-plan">
+                            <div class="plan-name">企业版</div>
+                            <div class="plan-price">¥199</div>
+                            <div class="plan-period">包月</div>
+                            <ul class="plan-features">
+                                <li>旗舰分离质量</li>
+                                <li>无限批量处理</li>
+                                <li>全格式支持</li>
+                                <li>无文件大小限制</li>
+                                <li>API接口访问</li>
+                                <li>专属技术支持</li>
+                            </ul>
+                            <button class="plan-btn" onclick="switchMainView('home')">联系我们</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- About Page -->
+            <div class="page-view" id="aboutPage">
+                <div class="page-title">关于我们</div>
+                <div class="page-subtitle">了解AI人声伴奏分离器的故事</div>
+                <div class="page-content">
+                    <div class="about-content">
+                        <p>AI人声伴奏分离器是一款基于先进深度学习技术的音频处理工具。我们的使命是让每一个人都能轻松获得专业级的音频分离效果。</p>
+                        
+                        <h3>我们的愿景</h3>
+                        <p>我们相信音乐创作应该是无障碍的。无论您是专业音乐人还是业余爱好者，我们的工具都能帮助您实现创意，让音频处理变得简单而高效。</p>
+                        
+                        <h3>技术优势</h3>
+                        <p>我们采用最新的深度学习架构，经过数百万首歌曲的训练，能够精准识别人声和各种乐器，提供业界领先的分离质量。</p>
+                        
+                        <h3>团队成员</h3>
+                        <div class="team-members">
+                            <div class="team-member">
+                                <div class="team-avatar">👨‍💻</div>
+                                <div class="team-name">张明</div>
+                                <div class="team-role">创始人 & CEO</div>
+                            </div>
+                            <div class="team-member">
+                                <div class="team-avatar">👩‍🔬</div>
+                                <div class="team-name">李华</div>
+                                <div class="team-role">首席AI科学家</div>
+                            </div>
+                            <div class="team-member">
+                                <div class="team-avatar">👨‍🎨</div>
+                                <div class="team-name">王芳</div>
+                                <div class="team-role">产品设计总监</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page-view" id="settingsPage">
+                <div class="page-title">设置</div>
+                <div class="page-subtitle">个性化您的使用体验</div>
+                <div class="page-content">
+                    <div class="settings-section">
+                        <label class="settings-label">输出格式</label>
+                        <select class="settings-select">
+                            <option>MP3 - 平衡音质与大小</option>
+                            <option>WAV - 无损音质</option>
+                            <option>FLAC - 无损压缩</option>
+                            <option>AAC - 高效压缩</option>
+                        </select>
+                    </div>
+                    <div class="settings-section">
+                        <label class="settings-label">分离质量</label>
+                        <select class="settings-select">
+                            <option>标准 - 快速处理</option>
+                            <option selected>高清 - 推荐使用</option>
+                            <option>旗舰 - 最佳质量</option>
+                        </select>
+                    </div>
+                    <div class="settings-section">
+                        <label class="settings-label">文件保存位置</label>
+                        <select class="settings-select">
+                            <option>下载文件夹</option>
+                            <option>桌面</option>
+                            <option>自定义文件夹</option>
+                        </select>
+                    </div>
+                    <div class="settings-section">
+                        <label class="settings-label">界面语言</label>
+                        <select class="settings-select">
+                            <option selected>简体中文</option>
+                            <option>English</option>
+                            <option>日本語</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Page -->
+            <div class="page-view" id="profilePage">
+                <div class="page-title">用户中心</div>
+                <div class="page-subtitle">管理您的账户和查看使用统计</div>
+                <div class="page-content">
+                    <div class="profile-info">
+                        <div class="profile-avatar">👤</div>
+                        <div class="profile-details">
+                            <div class="profile-name">用户</div>
+                            <div class="profile-email">user@example.com</div>
+                        </div>
+                    </div>
+                    <div class="profile-stats">
+                        <div class="stat-card">
+                            <div class="stat-value">12</div>
+                            <div class="stat-label">已处理文件</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">3</div>
+                            <div class="stat-label">今日剩余</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">免费版</div>
+                            <div class="stat-label">当前套餐</div>
+                        </div>
+                    </div>
+                    <div class="profile-actions">
+                        <button class="profile-btn profile-btn-secondary" onclick="switchMainView('settings')">账户设置</button>
+                        <button class="profile-btn profile-btn-secondary" onclick="switchMainView('pricing')">升级套餐</button>
+                        <button class="profile-btn profile-btn-danger" onclick="alert('已退出登录！')">退出登录</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Processing Page -->
+            <div class="batch-page" id="batchPage">
+                <div class="page-title" style="text-align: center;">批量处理</div>
+                <div class="page-subtitle">一次添加多个音频文件，排队自动处理</div>
+                <div class="page-content" style="max-width: 950px; margin: 0 auto;">
+                    <div class="batch-upload-area" id="batchUploadArea">
+                        <div class="upload-text">拖拽多个音频文件到此处</div>
+                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC 格式</div>
+                    </div>
+                    <input type="file" id="batchFileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac" multiple style="display: none;">
+
+                    <div class="batch-queue" id="batchQueue">
+                        <div class="batch-queue-header">
+                            <span class="batch-queue-title">任务队列</span>
+                            <span class="batch-queue-count" id="batchCount">0 个文件</span>
+                        </div>
+                        <div id="batchTaskList">
+                            <div class="batch-empty" id="batchEmpty">
+                                <div class="batch-empty-icon">📂</div>
+                                <div class="batch-empty-text">暂无文件，请添加音频文件</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="batch-actions">
+                        <button class="batch-btn batch-btn-secondary" onclick="clearBatchQueue()">🗑️ 清空队列</button>
+                        <button class="batch-btn batch-btn-primary" id="batchStartBtn" onclick="startBatchProcessing()" disabled>⚡ 开始分离</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Manager Page -->
+            <div class="file-manager-page" id="fileManagerPage">
+                <div class="page-header-bar">
+                    <div class="page-header-left">
+                        <div class="page-header-title">文件管理</div>
+                        <div class="page-header-count" id="fileCount">0 个文件</div>
+                    </div>
+                    <button class="btn-danger-action" onclick="deleteAllFiles()">🗑️ 清空所有文件</button>
+                </div>
+                <div class="file-list-container" id="fileListContainer">
+                    <div class="empty-state" id="fileEmptyState">
+                        <div class="empty-state-icon">📁</div>
+                        <div class="empty-state-text">暂无处理文件</div>
+                        <div class="empty-state-hint">处理音频后，文件将显示在这里</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Library Page -->
+            <div class="library-page" id="libraryPage">
+                <div class="page-header-bar">
+                    <div class="page-header-left">
+                        <div class="page-header-title">音乐素材库</div>
+                        <div class="page-header-count" id="libraryCount">0 个素材</div>
+                    </div>
+                </div>
+                <div class="file-list-container" id="libraryListContainer">
+                    <div class="empty-state" id="libraryEmptyState">
+                        <div class="empty-state-icon">🎵</div>
+                        <div class="empty-state-text">素材库为空</div>
+                        <div class="empty-state-hint">在播放页面点击"收入素材库"添加素材</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

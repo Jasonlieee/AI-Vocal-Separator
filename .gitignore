@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Audio files
+static/*.wav
+static/*.mp3
+static/*.flac
+static/*.ogg
+static/*.aac
+temp/
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.aac
+
+# Logs
+*.log
+tunnel.log
+tunnel_err.log
+
+# Tunnel tools
+cloudflared.exe
+start_tunnel.bat
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*_backup.*
+*.bak
+
+# Test files
+test_*.py
+
+# Data files
+library.json

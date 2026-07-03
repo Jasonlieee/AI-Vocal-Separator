@@ -51,3 +51,13 @@ test_*.py
 
 # Data files
 library.json
+
+# AI model binaries (large files, auto-downloaded on first run)
+models/*.th
+
+# Server runtime logs
+server_output.txt
+server_err.txt
+
+# TRAE internal artifacts
+.trae/

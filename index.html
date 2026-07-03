@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI人声伴奏分离器</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/style.css" rel="stylesheet">
 </head>
 <body>
     <!-- Starfield Effect -->
@@ -15,7 +19,7 @@
     <div class="window-container">
         <!-- Navigation Bar -->
         <div class="nav-bar">
-            <div class="logo-section">
+            <div class="logo-section" onclick="goHome()" style="cursor: pointer;" title="返回首页">
                 <span class="logo-icon">⏯</span>
                 <span class="logo-text">AI人声伴奏分离器</span>
             </div>
@@ -51,9 +55,9 @@
 
                     <div class="upload-area" id="uploadArea">
                         <div class="upload-text">拖拽音频文件到此处</div>
-                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC 格式，最大 50MB</div>
+                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC、MGG 格式，最大 50MB</div>
                     </div>
-                    <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac" style="display: none;">
+                    <input type="file" id="fileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac,.mgg" style="display: none;">
 
                     <div class="conversion-options" id="conversionOptions">
                         <div class="option-group">
@@ -69,12 +73,119 @@
                         </div>
                         <div class="option-group">
                             <label class="option-label">处理模式：</label>
-                            <select id="processMode" class="format-select">
+                            <select id="processMode" class="format-select" onchange="onProcessModeChange()">
                                 <option value="separate">仅分离音频</option>
                                 <option value="convert">仅转换格式</option>
                                 <option value="convert-and-separate">转换格式 + 分离</option>
                                 <option value="enhance">一键提升音质</option>
                             </select>
+                        </div>
+                        <div class="option-group" id="modelSelectorGroup">
+                            <label class="option-label">分离模型：</label>
+                            <select id="separateModel" class="format-select" onchange="onModelChange()">
+                                <option value="4s" selected>4轨（高质量）</option>
+                                <option value="6s">6轨（实验性）- 含钢琴/吉他</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 分轨组合选择面板 -->
+                    <div class="stem-group-panel" id="stemGroupPanel">
+                        <div class="stem-group-header">
+                            <span class="stem-group-title">🎛️ 分轨组合</span>
+                            <span class="stem-group-hint">自由组合分离后的音轨</span>
+                        </div>
+
+                        <!-- 预设组合 -->
+                        <div class="stem-presets" id="stemPresets">
+                            <button class="stem-preset-btn active" data-preset="default" onclick="applyPreset('default')">全部独立</button>
+                            <button class="stem-preset-btn" data-preset="2track" onclick="applyPreset('2track')">人声 + 伴奏</button>
+                            <button class="stem-preset-btn" data-preset="3track" onclick="applyPreset('3track')">人声 + 鼓 + 伴奏</button>
+                            <button class="stem-preset-btn" data-preset="custom" onclick="applyPreset('custom')">自定义</button>
+                        </div>
+
+                        <!-- 自定义分轨配置 -->
+                        <div class="stem-custom-config hidden" id="stemCustomConfig">
+                            <div class="stem-row">
+                                <span class="stem-icon">🎤</span>
+                                <span class="stem-name">人声</span>
+                                <select class="stem-group-select" id="stemGroupVocals" onchange="onStemGroupChange()">
+                                    <option value="A" selected>轨道 A</option>
+                                    <option value="B">轨道 B</option>
+                                    <option value="C">轨道 C</option>
+                                    <option value="D">轨道 D</option>
+                                    <option value="E">轨道 E</option>
+                                    <option value="F">轨道 F</option>
+                                </select>
+                            </div>
+                            <div class="stem-row">
+                                <span class="stem-icon">🥁</span>
+                                <span class="stem-name">鼓</span>
+                                <select class="stem-group-select" id="stemGroupDrums" onchange="onStemGroupChange()">
+                                    <option value="A">轨道 A</option>
+                                    <option value="B" selected>轨道 B</option>
+                                    <option value="C">轨道 C</option>
+                                    <option value="D">轨道 D</option>
+                                    <option value="E">轨道 E</option>
+                                    <option value="F">轨道 F</option>
+                                </select>
+                            </div>
+                            <div class="stem-row">
+                                <span class="stem-icon">🎸</span>
+                                <span class="stem-name">贝斯</span>
+                                <select class="stem-group-select" id="stemGroupBass" onchange="onStemGroupChange()">
+                                    <option value="A">轨道 A</option>
+                                    <option value="B">轨道 B</option>
+                                    <option value="C" selected>轨道 C</option>
+                                    <option value="D">轨道 D</option>
+                                    <option value="E">轨道 E</option>
+                                    <option value="F">轨道 F</option>
+                                </select>
+                            </div>
+                            <div class="stem-row">
+                                <span class="stem-icon">🎵</span>
+                                <span class="stem-name">伴奏</span>
+                                <select class="stem-group-select" id="stemGroupOther" onchange="onStemGroupChange()">
+                                    <option value="A">轨道 A</option>
+                                    <option value="B">轨道 B</option>
+                                    <option value="C">轨道 C</option>
+                                    <option value="D" selected>轨道 D</option>
+                                    <option value="E">轨道 E</option>
+                                    <option value="F">轨道 F</option>
+                                </select>
+                            </div>
+                            <div class="stem-row stem-6s-only hidden" id="stemRowGuitar">
+                                <span class="stem-icon">🎸</span>
+                                <span class="stem-name">吉他</span>
+                                <select class="stem-group-select" id="stemGroupGuitar" onchange="onStemGroupChange()">
+                                    <option value="A">轨道 A</option>
+                                    <option value="B">轨道 B</option>
+                                    <option value="C">轨道 C</option>
+                                    <option value="D">轨道 D</option>
+                                    <option value="E" selected>轨道 E</option>
+                                    <option value="F">轨道 F</option>
+                                </select>
+                            </div>
+                            <div class="stem-row stem-6s-only hidden" id="stemRowPiano">
+                                <span class="stem-icon">🎹</span>
+                                <span class="stem-name">钢琴</span>
+                                <select class="stem-group-select" id="stemGroupPiano" onchange="onStemGroupChange()">
+                                    <option value="A">轨道 A</option>
+                                    <option value="B">轨道 B</option>
+                                    <option value="C">轨道 C</option>
+                                    <option value="D">轨道 D</option>
+                                    <option value="E">轨道 E</option>
+                                    <option value="F" selected>轨道 F</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 预览：将要生成的轨道 -->
+                        <div class="stem-preview" id="stemPreview">
+                            <div class="stem-preview-item">轨道 A: 人声</div>
+                            <div class="stem-preview-item">轨道 B: 鼓</div>
+                            <div class="stem-preview-item">轨道 C: 贝斯</div>
+                            <div class="stem-preview-item">轨道 D: 伴奏</div>
                         </div>
                     </div>
 
@@ -101,142 +212,139 @@
 
                 <!-- Player View -->
                 <div class="player-view hidden" id="playerView">
-                    <div class="track-card">
-                        <div class="track-header">
-                            <div class="track-title">
-                                <div class="track-icon">🎤</div>
-                                <div class="track-name">人声轨道</div>
-                            </div>
-                            <div class="track-controls">
-                                <button class="btn-download" onclick="downloadTrack('vocals')">⬇️ 下载</button>
-                                <button class="btn-mute" id="muteVocals" onclick="toggleMute('vocals')">M</button>
-                                <button class="btn-solo" id="soloVocals" onclick="toggleSolo('vocals')">S</button>
+                    <!-- 顶部操作栏 -->
+                    <div class="player-top-bar">
+                        <div class="player-top-left">
+                            <button class="btn-back-home-simple" onclick="goHome()">← 返回首页</button>
+                        </div>
+                        <div class="player-top-center">
+                            <div class="player-title-row">
+                                <span class="player-title">分离结果</span>
+                                <span class="player-status-dot"></span>
+                                <span class="player-status-text">处理完成</span>
                             </div>
                         </div>
-                        <div class="track-content">
-                            <div class="volume-control">
-                                <input type="range" class="volume-slider" min="0" max="100" value="80" id="volumeVocals">
-                                <span>🔊</span>
+                        <div class="player-top-right">
+                            <div class="player-top-actions">
+                                <button class="player-top-btn" onclick="resetApp()">🔄 重新开始</button>
+                                <button class="player-top-btn" id="addToLibraryBtn" onclick="addToLibrary()">⭐ 收入素材库</button>
+                                <button class="player-top-btn primary" onclick="downloadAll()">📤 全部导出</button>
                             </div>
-                            <div class="waveform-container" id="waveformVocals" onclick="seekWaveform('vocals', event)">
+                        </div>
+                    </div>
+
+                    <!-- 轨道卡片（横向长条） -->
+                    <div id="trackControlsContainer" class="tracks-row-container">
+                        <!-- 默认4轨卡片 -->
+                        <div class="track-bar" data-track="vocals">
+                            <div class="track-bar-left">
+                                <div class="track-bar-icon">🎤</div>
+                                <div class="track-bar-name">人声轨道</div>
+                            </div>
+                            <div class="track-bar-volume">
+                                <input type="range" class="track-volume-slider" orient="vertical" id="volumeVocals" min="0" max="100" value="80" title="音量">
+                            </div>
+                            <div class="track-bar-waveform" id="waveformVocals" onclick="seekWaveform('vocals', event)">
                                 <canvas class="waveform-canvas" id="canvasVocals"></canvas>
                                 <div class="waveform-progress" id="progressVocals"></div>
                                 <div class="waveform-playhead" id="playheadVocals"></div>
                             </div>
+                            <div class="track-bar-controls">
+                                <button class="track-bar-btn" onclick="downloadTrack('vocals')" title="下载">⬇</button>
+                                <button class="track-bar-btn ms" id="muteVocals" onclick="toggleMute('vocals')" title="静音">M</button>
+                                <button class="track-bar-btn ms" id="soloVocals" onclick="toggleSolo('vocals')" title="独奏">S</button>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="track-card">
-                        <div class="track-header">
-                            <div class="track-title">
-                                <div class="track-icon">🥁</div>
-                                <div class="track-name">鼓组轨道</div>
+                        <div class="track-bar" data-track="drums">
+                            <div class="track-bar-left">
+                                <div class="track-bar-icon">⭕</div>
+                                <div class="track-bar-name">鼓组轨道</div>
                             </div>
-                            <div class="track-controls">
-                                <button class="btn-download" onclick="downloadTrack('drums')">⬇️ 下载</button>
-                                <button class="btn-mute" id="muteDrums" onclick="toggleMute('drums')">M</button>
-                                <button class="btn-solo" id="soloDrums" onclick="toggleSolo('drums')">S</button>
+                            <div class="track-bar-volume">
+                                <input type="range" class="track-volume-slider" orient="vertical" id="volumeDrums" min="0" max="100" value="70" title="音量">
                             </div>
-                        </div>
-                        <div class="track-content">
-                            <div class="volume-control">
-                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeDrums">
-                                <span>🔊</span>
-                            </div>
-                            <div class="waveform-container" id="waveformDrums" onclick="seekWaveform('drums', event)">
+                            <div class="track-bar-waveform" id="waveformDrums" onclick="seekWaveform('drums', event)">
                                 <canvas class="waveform-canvas" id="canvasDrums"></canvas>
                                 <div class="waveform-progress" id="progressDrums"></div>
                                 <div class="waveform-playhead" id="playheadDrums"></div>
                             </div>
+                            <div class="track-bar-controls">
+                                <button class="track-bar-btn" onclick="downloadTrack('drums')" title="下载">⬇</button>
+                                <button class="track-bar-btn ms" id="muteDrums" onclick="toggleMute('drums')" title="静音">M</button>
+                                <button class="track-bar-btn ms" id="soloDrums" onclick="toggleSolo('drums')" title="独奏">S</button>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="track-card">
-                        <div class="track-header">
-                            <div class="track-title">
-                                <div class="track-icon">🎸</div>
-                                <div class="track-name">贝斯轨道</div>
+                        <div class="track-bar" data-track="bass">
+                            <div class="track-bar-left">
+                                <div class="track-bar-icon">🎸</div>
+                                <div class="track-bar-name">贝斯轨道</div>
                             </div>
-                            <div class="track-controls">
-                                <button class="btn-download" onclick="downloadTrack('bass')">⬇️ 下载</button>
-                                <button class="btn-mute" id="muteBass" onclick="toggleMute('bass')">M</button>
-                                <button class="btn-solo" id="soloBass" onclick="toggleSolo('bass')">S</button>
+                            <div class="track-bar-volume">
+                                <input type="range" class="track-volume-slider" orient="vertical" id="volumeBass" min="0" max="100" value="70" title="音量">
                             </div>
-                        </div>
-                        <div class="track-content">
-                            <div class="volume-control">
-                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeBass">
-                                <span>🔊</span>
-                            </div>
-                            <div class="waveform-container" id="waveformBass" onclick="seekWaveform('bass', event)">
+                            <div class="track-bar-waveform" id="waveformBass" onclick="seekWaveform('bass', event)">
                                 <canvas class="waveform-canvas" id="canvasBass"></canvas>
                                 <div class="waveform-progress" id="progressBass"></div>
                                 <div class="waveform-playhead" id="playheadBass"></div>
                             </div>
+                            <div class="track-bar-controls">
+                                <button class="track-bar-btn" onclick="downloadTrack('bass')" title="下载">⬇</button>
+                                <button class="track-bar-btn ms" id="muteBass" onclick="toggleMute('bass')" title="静音">M</button>
+                                <button class="track-bar-btn ms" id="soloBass" onclick="toggleSolo('bass')" title="独奏">S</button>
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="track-card">
-                        <div class="track-header">
-                            <div class="track-title">
-                                <div class="track-icon">🎵</div>
-                                <div class="track-name">其他轨道</div>
+                        <div class="track-bar" data-track="other">
+                            <div class="track-bar-left">
+                                <div class="track-bar-icon">🎵</div>
+                                <div class="track-bar-name">其他轨道</div>
                             </div>
-                            <div class="track-controls">
-                                <button class="btn-download" onclick="downloadTrack('other')">⬇️ 下载</button>
-                                <button class="btn-mute" id="muteOther" onclick="toggleMute('other')">M</button>
-                                <button class="btn-solo" id="soloOther" onclick="toggleSolo('other')">S</button>
+                            <div class="track-bar-volume">
+                                <input type="range" class="track-volume-slider" orient="vertical" id="volumeOther" min="0" max="100" value="70" title="音量">
                             </div>
-                        </div>
-                        <div class="track-content">
-                            <div class="volume-control">
-                                <input type="range" class="volume-slider" min="0" max="100" value="70" id="volumeOther">
-                                <span>🔊</span>
-                            </div>
-                            <div class="waveform-container" id="waveformOther" onclick="seekWaveform('other', event)">
+                            <div class="track-bar-waveform" id="waveformOther" onclick="seekWaveform('other', event)">
                                 <canvas class="waveform-canvas" id="canvasOther"></canvas>
                                 <div class="waveform-progress" id="progressOther"></div>
                                 <div class="waveform-playhead" id="playheadOther"></div>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Timeline -->
-                    <div class="timeline-container" id="timeline">
-                        <div class="timeline-markers" id="timelineMarkers"></div>
-                        <div class="timeline-track">
-                            <div class="timeline-fill" id="timelineFill"></div>
-                        </div>
-                        <div class="timeline-handle" id="timelineHandle"></div>
-                        <div class="timeline-time" id="timelineTime">0:00 / 0:00</div>
-                    </div>
-
-                    <!-- Playback Controls -->
-                    <div style="display: flex; justify-content: center; gap: 18px; margin-bottom: 20px; margin-top: 24px;">
-                        <button class="player-footer-btn" onclick="skipBackward()">⏮️ 后退10秒</button>
-                        <button class="player-footer-btn" onclick="stopAllAudio()">⏹️ 停止</button>
-                        <button class="player-footer-btn btn-primary" id="playPauseBtn" onclick="togglePlayPause()">▶️ 播放</button>
-                        <button class="player-footer-btn" onclick="skipForward()">⏭️ 前进10秒</button>
-                    </div>
-
-                    <div class="player-footer">
-                        <div style="display: flex; gap: 11px;">
-                            <button class="player-footer-btn" onclick="resetApp()">🔄 重新开始</button>
-                            <div class="status-badge">
-                                <span class="status-dot"></span>
-                                <span>处理完成</span>
+                            <div class="track-bar-controls">
+                                <button class="track-bar-btn" onclick="downloadTrack('other')" title="下载">⬇</button>
+                                <button class="track-bar-btn ms" id="muteOther" onclick="toggleMute('other')" title="静音">M</button>
+                                <button class="track-bar-btn ms" id="soloOther" onclick="toggleSolo('other')" title="独奏">S</button>
                             </div>
                         </div>
-                        <div style="display: flex; gap: 11px;">
-                            <button class="btn-add-library" id="addToLibraryBtn" onclick="addToLibrary()">⭐ 收入素材库</button>
-                            <button class="player-footer-btn" onclick="switchMainView('settings')">⚙️ 设置</button>
-                            <button class="player-footer-btn btn-primary" onclick="downloadAll()">📤 全部导出</button>
+                    </div>
+
+                    <!-- 底部主播放控制条（双层：上层进度条，下层控制按钮） -->
+                    <div class="player-main-bar">
+                        <!-- 上层：进度条（在播放按钮正上方） -->
+                        <div class="player-progress-row" id="timeline" onclick="seekTimeline(event)">
+                            <span class="player-time" id="playerTimeCurrent">0:00</span>
+                            <div class="player-progress-outer">
+                                <div class="player-progress-inner" id="timelineFill"></div>
+                                <div class="player-progress-handle" id="timelineHandle"></div>
+                            </div>
+                            <span class="player-time" id="playerTimeTotal">0:00</span>
+                        </div>
+                        <!-- 下层：控制按钮 -->
+                        <div class="player-controls-row">
+                            <button class="player-ctrl-btn" onclick="skipBackward()" title="后退10秒">⏮</button>
+                            <button class="player-ctrl-btn" onclick="stopAllAudio()" title="停止">⏹</button>
+                            <button class="player-ctrl-play" id="playPauseBtn" onclick="togglePlayPause()" title="播放/暂停">▶</button>
+                            <button class="player-ctrl-btn" onclick="skipForward()" title="前进10秒">⏭</button>
+                            <button class="player-ctrl-btn" onclick="toggleLoop()" id="loopBtn" title="循环播放">🔁</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Enhancer Player View -->
                 <div class="enhancer-player-view hidden" id="enhancerPlayerView">
+                    <div class="view-top-bar">
+                        <button class="btn-back-home" onclick="goHome()">← 返回首页</button>
+                        <div class="view-title">音质提升</div>
+                    </div>
                     <div class="enhancer-header">
                         <div class="enhancer-title">🎵 音质提升对比</div>
                         <div class="enhancer-filename" id="enhancerFilename">文件名.mp3</div>
@@ -492,9 +600,9 @@
                 <div class="page-content" style="max-width: 950px; margin: 0 auto;">
                     <div class="batch-upload-area" id="batchUploadArea">
                         <div class="upload-text">拖拽多个音频文件到此处</div>
-                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC 格式</div>
+                        <div class="upload-hint">支持 MP3、WAV、FLAC、OGG、AAC、WMA、M4A、APE、ALAC、MGG 格式</div>
                     </div>
-                    <input type="file" id="batchFileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac" multiple style="display: none;">
+                    <input type="file" id="batchFileInput" accept=".mp3,.wav,.flac,.ogg,.aac,.wma,.m4a,.ape,.alac,.mgg" multiple style="display: none;">
 
                     <div class="batch-queue" id="batchQueue">
                         <div class="batch-queue-header">

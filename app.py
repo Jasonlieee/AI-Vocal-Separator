@@ -8,7 +8,7 @@ import time
 import numpy as np
 import torch
 import soundfile as sf
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +56,7 @@ class LibraryItem(BaseModel):
     other_url: str
 
 model = None
+model_6s = None  # 6轨实验模型
 device = None
 ffmpeg_path = None
 
@@ -79,18 +80,48 @@ def find_ffmpeg():
         return False
 
 def load_model():
-    global model, device
+    global model, model_6s, device
     try:
         print("正在加载 Demucs 模型...")
         from demucs import pretrained
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"使用设备: {device}")
+
+        # 优先从项目本地 models/ 复制到 torch 缓存（兼容 PyTorch 2.6+）
+        local_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+        cache_dir = os.path.join(torch.hub.get_dir(), "checkpoints")
+        os.makedirs(cache_dir, exist_ok=True)
+
+        if os.path.isdir(local_model_dir):
+            for f in os.listdir(local_model_dir):
+                if f.endswith('.th'):
+                    src = os.path.join(local_model_dir, f)
+                    dst = os.path.join(cache_dir, f)
+                    if not os.path.exists(dst):
+                        print(f"复制本地模型到缓存: {f}")
+                        import shutil
+                        shutil.copy2(src, dst)
+                    else:
+                        print(f"模型已存在于缓存: {f}")
+
+        # 加载4轨模型（默认）
+        print("加载 4轨模型 (htdemucs)...")
         model = pretrained.get_model("htdemucs")
         model.to(device)
         model.eval()
-        print(f"[OK] Demucs 模型加载成功!")
-        print(f"   模型采样率: {model.samplerate}")
-        print(f"   源: {model.sources}")
+        print(f"[OK] 4轨模型加载成功! 源: {model.sources}")
+
+        # 加载6轨实验模型
+        try:
+            print("加载 6轨实验模型 (htdemucs_6s)...")
+            model_6s = pretrained.get_model("htdemucs_6s")
+            model_6s.to(device)
+            model_6s.eval()
+            print(f"[OK] 6轨模型加载成功! 源: {model_6s.sources}")
+        except Exception as e:
+            print(f"[WARN] 6轨模型加载失败（可选功能）: {e}")
+            model_6s = None
+
         return True
     except Exception as e:
         print(f"[ERROR] 模型加载失败: {e}")
@@ -130,7 +161,8 @@ def clear_directory(directory):
             print(f"无法删除 {file_path}: {e}")
 
 clear_directory(TEMP_DIR)
-clear_directory(STATIC_DIR)
+# 注意：不清空 STATIC_DIR，保留已分离的音频文件以支持素材库回放
+# STATIC_DIR 中的文件由各端点自行管理其生命周期
 
 @app.get("/")
 async def read_root():
@@ -147,7 +179,12 @@ async def read_scripts():
 def convert_to_wav(input_path):
     if input_path.lower().endswith('.wav'):
         return input_path
+    
     wav_path = input_path + ".wav"
+    
+    if input_path.lower().endswith('.mgg'):
+        raise RuntimeError("MGG 格式是网易云音乐的加密专有格式，无法直接处理。请先使用网易云音乐客户端或其他工具将其转换为 MP3/WAV/FLAC 等标准音频格式后再上传。")
+    
     cmd = [ffmpeg_path, "-y", "-i", input_path, "-ar", "44100", "-ac", "2", wav_path]
     print(f"转换命令: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -243,8 +280,8 @@ async def separate_audio_endpoint(file: UploadFile = File(...)):
 
     try:
         # 支持的输入格式
-        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac']
-        
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
+
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in supported_input_formats:
             raise HTTPException(status_code=400, detail=f"不支持的输入格式: {ext}，支持的格式: {', '.join(supported_input_formats)}")
@@ -284,6 +321,152 @@ async def separate_audio_endpoint(file: UploadFile = File(...)):
         raise
     except Exception as e:
         print(f"[ERROR] 请求处理异常: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        lock.release()
+
+
+def merge_stems(stem_paths, groups):
+    """
+    将分离后的音轨按分组合并。
+    stem_paths: dict, 如 {'vocals': path, 'drums': path, 'bass': path, 'other': path}
+    groups: dict, 如 {'A': ['vocals'], 'B': ['drums', 'bass', 'other']}
+    返回: dict, 如 {'A': merged_path_A, 'B': merged_path_B}
+    """
+    try:
+        print(f"\n{'='*50}")
+        print(f"[MERGE] 开始按组合并音轨...")
+        print(f"   分组: {groups}")
+
+        result = {}
+        for group_name, stem_names in groups.items():
+            if not stem_names:
+                continue
+
+            # 加载第一个音轨
+            first_stem = stem_names[0]
+            audio_data, sr = sf.read(stem_paths[first_stem], dtype='float32')
+            print(f"   组 {group_name}: 加载 {first_stem}, 形状={audio_data.shape}")
+
+            # 如果有多个音轨，逐个叠加
+            for stem_name in stem_names[1:]:
+                extra_data, extra_sr = sf.read(stem_paths[stem_name], dtype='float32')
+                print(f"      + 加载 {stem_name}, 形状={extra_data.shape}")
+
+                # 确保长度一致
+                min_len = min(len(audio_data), len(extra_data))
+                audio_data = audio_data[:min_len] + extra_data[:min_len]
+
+            # 归一化防止溢出
+            max_val = np.max(np.abs(audio_data))
+            if max_val > 1.0:
+                audio_data = audio_data / max_val * 0.95
+                print(f"      归一化: max={max_val:.3f} -> 0.95")
+
+            # 保存合并后的文件
+            uid = uuid.uuid4()
+            output_path = os.path.join(STATIC_DIR, f"{uid}_group{group_name}.wav")
+            sf.write(output_path, audio_data, sr)
+            output_size = os.path.getsize(output_path)
+            print(f"   组 {group_name} 保存: {output_path} ({output_size} bytes)")
+
+            result[group_name] = output_path
+
+        print(f"[OK] 合并完成! 共 {len(result)} 个分组")
+        print(f"{'='*50}\n")
+        return result
+
+    except Exception as e:
+        print(f"[ERROR] 合并失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+class StemGroups(BaseModel):
+    groups: dict  # {'A': ['vocals'], 'B': ['drums', 'bass', 'other']}
+
+
+@app.post("/api/separate-custom")
+async def separate_custom_endpoint(file: UploadFile = File(...), groups: str = Form("{}")):
+    """自定义分轨组合分离API"""
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="另一个分离任务正在进行中，请稍后再试...")
+
+    try:
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in supported_input_formats:
+            raise HTTPException(status_code=400, detail=f"不支持的输入格式: {ext}")
+
+        # 解析分组配置
+        try:
+            print(f"[DEBUG] 收到 groups 参数: {groups}")
+            groups_dict = json.loads(groups)
+            print(f"[DEBUG] 解析后的分组: {groups_dict}")
+            # 格式: {"A": ["vocals"], "B": ["drums", "bass", "other"]}
+            # 验证分组内容
+            valid_stems = {'vocals', 'drums', 'bass', 'other'}
+            for group_name, stem_list in groups_dict.items():
+                for stem in stem_list:
+                    if stem not in valid_stems:
+                        raise HTTPException(status_code=400, detail=f"无效的音轨名称: {stem}，可选: vocals, drums, bass, other")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="分组配置JSON格式错误")
+
+        file_id = str(uuid.uuid4())
+        temp_file_path = os.path.join(TEMP_DIR, f"{file_id}{ext}")
+
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        print(f"已保存文件: {temp_file_path} ({os.path.getsize(temp_file_path)} bytes)")
+
+        # 第一步：Demucs 分离4轨
+        print("步骤1: Demucs 分离原始4轨...")
+        separate_result = separate_audio_with_demucs(temp_file_path, STATIC_DIR)
+
+        if separate_result is None:
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+            raise HTTPException(status_code=500, detail="音频分离失败")
+
+        # 第二步：按组合并
+        print("步骤2: 按组合并音轨...")
+        merge_result = merge_stems(separate_result, groups_dict)
+
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+
+        if merge_result is None:
+            raise HTTPException(status_code=500, detail="音轨合并失败")
+
+        # 构建返回数据
+        tracks = []
+        for group_name in sorted(groups_dict.keys()):
+            if group_name in merge_result:
+                tracks.append({
+                    "id": group_name,
+                    "label": "轨道 " + group_name,
+                    "stems": groups_dict[group_name],
+                    "url": f"/static/{os.path.basename(merge_result[group_name])}"
+                })
+
+        return {
+            "status": "success",
+            "tracks": tracks
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 自定义分轨请求处理异常: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -343,12 +526,197 @@ def convert_audio_format(input_path, output_format, output_dir):
         traceback.print_exc()
         return None
 
+def separate_audio_with_demucs_6s(input_path, output_dir):
+    """使用 htdemucs_6s 模型分离6轨"""
+    try:
+        print(f"\n{'='*50}")
+        print(f"[START-6S] 开始6轨分离: {input_path}")
+
+        if model_6s is None:
+            print("[ERROR] 6轨模型未加载!")
+            return None
+
+        from demucs.apply import apply_model
+
+        print("步骤 1: 转换为 WAV...")
+        wav_path = convert_to_wav(input_path)
+
+        print("步骤 2: 加载音频数据...")
+        wav = load_audio(wav_path, model_6s.samplerate)
+
+        if wav_path != input_path and os.path.exists(wav_path):
+            os.remove(wav_path)
+
+        wav = wav[None]
+        print(f"步骤 3: 执行6轨分离 (输入形状: {wav.shape})...")
+
+        with torch.no_grad():
+            sources = apply_model(model_6s, wav, device=device, shifts=0, split=True, overlap=0.25)[0]
+
+        print(f"分离结果形状: {sources.shape}")
+
+        print("步骤 4: 保存6个轨道...")
+        uid = uuid.uuid4()
+
+        track_names = model_6s.sources  # ['drums', 'bass', 'other', 'vocals', 'guitar', 'piano']
+        track_paths = {}
+
+        for i, name in enumerate(track_names):
+            track_path = os.path.join(output_dir, f"{uid}_{name}.wav")
+            sf.write(track_path, sources[i].cpu().numpy().T, model_6s.samplerate)
+            track_size = os.path.getsize(track_path)
+            track_paths[name] = track_path
+            print(f"   {name}: {track_path} ({track_size} bytes)")
+
+        print(f"[OK] 6轨分离成功!")
+        print(f"{'='*50}\n")
+
+        return track_paths
+
+    except Exception as e:
+        print(f"[ERROR] 6轨分离失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+@app.get("/api/model-status")
+async def get_model_status():
+    """返回模型加载状态"""
+    return {
+        "model_4s": model is not None,
+        "model_6s": model_6s is not None,
+        "sources_4s": model.sources if model else [],
+        "sources_6s": model_6s.sources if model_6s else []
+    }
+
+
+@app.post("/api/separate-6s")
+async def separate_6s_endpoint(file: UploadFile = File(...)):
+    """6轨分离API"""
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="另一个分离任务正在进行中，请稍后再试...")
+
+    try:
+        if model_6s is None:
+            raise HTTPException(status_code=503, detail="6轨模型未加载，请使用4轨模式")
+
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in supported_input_formats:
+            raise HTTPException(status_code=400, detail=f"不支持的输入格式: {ext}")
+
+        file_id = str(uuid.uuid4())
+        temp_file_path = os.path.join(TEMP_DIR, f"{file_id}{ext}")
+
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        print(f"已保存文件: {temp_file_path} ({os.path.getsize(temp_file_path)} bytes)")
+
+        result = separate_audio_with_demucs_6s(temp_file_path, STATIC_DIR)
+
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+
+        if result is None:
+            raise HTTPException(status_code=500, detail="6轨分离失败")
+
+        return {
+            "status": "success",
+            "sources": {name: f"/static/{os.path.basename(path)}" for name, path in result.items()}
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 6轨分离请求处理异常: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        lock.release()
+
+
+@app.post("/api/separate-custom-6s")
+async def separate_custom_6s_endpoint(file: UploadFile = File(...), groups: str = Form("{}")):
+    """6轨自定义分组分离API"""
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="另一个分离任务正在进行中，请稍后再试...")
+
+    try:
+        if model_6s is None:
+            raise HTTPException(status_code=503, detail="6轨模型未加载")
+
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in supported_input_formats:
+            raise HTTPException(status_code=400, detail=f"不支持的输入格式: {ext}")
+
+        try:
+            groups_dict = json.loads(groups)
+            valid_stems = {'vocals', 'drums', 'bass', 'other', 'guitar', 'piano'}
+            for group_name, stem_list in groups_dict.items():
+                for stem in stem_list:
+                    if stem not in valid_stems:
+                        raise HTTPException(status_code=400, detail=f"无效的音轨名称: {stem}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="分组配置JSON格式错误")
+
+        file_id = str(uuid.uuid4())
+        temp_file_path = os.path.join(TEMP_DIR, f"{file_id}{ext}")
+
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # 第一步：6轨分离
+        separate_result = separate_audio_with_demucs_6s(temp_file_path, STATIC_DIR)
+
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+
+        if separate_result is None:
+            raise HTTPException(status_code=500, detail="6轨分离失败")
+
+        # 第二步：按组合并
+        merge_result = merge_stems(separate_result, groups_dict)
+
+        if merge_result is None:
+            raise HTTPException(status_code=500, detail="音轨合并失败")
+
+        tracks = []
+        for group_name in sorted(groups_dict.keys()):
+            if group_name in merge_result:
+                tracks.append({
+                    "id": group_name,
+                    "label": "轨道 " + group_name,
+                    "stems": groups_dict[group_name],
+                    "url": f"/static/{os.path.basename(merge_result[group_name])}"
+                })
+
+        return {"status": "success", "tracks": tracks}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] 6轨自定义分轨异常: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        lock.release()
+
+
 @app.post("/api/convert")
 async def convert_audio_endpoint(file: UploadFile = File(...), output_format: str = "mp3"):
     """音频格式转换API"""
     try:
         # 支持的输入格式
-        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac']
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
         
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in supported_input_formats:
@@ -406,7 +774,7 @@ async def convert_and_separate_endpoint(file: UploadFile = File(...), output_for
 
     try:
         # 支持的输入格式
-        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac']
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
         
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in supported_input_formats:
@@ -474,7 +842,7 @@ async def batch_separate_endpoint(file: UploadFile = File(...)):
         raise HTTPException(status_code=409, detail="另一个分离任务正在进行中，请稍后再试...")
 
     try:
-        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac']
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
         
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in supported_input_formats:
@@ -553,10 +921,38 @@ async def delete_all_files():
                     pass
     return {"status": "success", "deleted": deleted}
 
+def _url_to_path(url):
+    """将 /static/xxx.wav 转换为本地文件路径 static/xxx.wav"""
+    if url and url.startswith("/static/"):
+        return os.path.join(STATIC_DIR, url[len("/static/"):])
+    return None
+
+
 @app.get("/api/library")
 async def get_library():
     items = load_library()
-    return {"items": items}
+    # 过滤掉音频文件已不存在的条目（文件被删除、服务器重启清理等）
+    valid_items = []
+    removed_count = 0
+    for item in items:
+        urls_to_check = [item.get("vocals_url"), item.get("drums_url"), item.get("bass_url"), item.get("other_url")]
+        urls_to_check = [u for u in urls_to_check if u]
+        all_exist = True
+        for url in urls_to_check:
+            local_path = _url_to_path(url)
+            if local_path and not os.path.isfile(local_path):
+                print(f"[素材库] 跳过条目 '{item.get('name', '?')}'，文件不存在: {local_path}")
+                all_exist = False
+                break
+        if all_exist:
+            valid_items.append(item)
+        else:
+            removed_count += 1
+    if removed_count > 0:
+        # 自动清理无效条目
+        save_library(valid_items)
+        print(f"[素材库] 已清理 {removed_count} 个无效条目")
+    return {"items": valid_items}
 
 @app.post("/api/library")
 async def add_to_library(item: LibraryItem):
@@ -634,6 +1030,23 @@ def enhance_audio_with_noisereduce(input_path, output_dir):
 
         print(f"   输出形状: {enhanced_audio.shape}")
 
+        # 响度补偿：降噪后音量与原曲对齐
+        print("步骤 3: 响度补偿...")
+        original_rms = np.sqrt(np.mean(audio_np.astype(np.float64) ** 2))
+        enhanced_rms = np.sqrt(np.mean(enhanced_audio.astype(np.float64) ** 2))
+        if enhanced_rms > 1e-8 and original_rms > 1e-8:
+            gain = original_rms / enhanced_rms
+            # 限制增益范围，防止过度放大
+            gain = min(gain, 10.0)
+            enhanced_audio = enhanced_audio * gain
+            # 防止溢出裁剪
+            max_val = np.max(np.abs(enhanced_audio))
+            if max_val > 1.0:
+                enhanced_audio = enhanced_audio / max_val * 0.98
+            print(f"   原始RMS: {original_rms:.6f}, 降噪后RMS: {enhanced_rms:.6f}, 增益: {gain:.2f}x")
+        else:
+            print(f"   跳过响度补偿（信号过弱）")
+
         # 保存结果
         uid = uuid.uuid4()
         output_path = os.path.join(output_dir, f"{uid}_enhanced.wav")
@@ -664,7 +1077,7 @@ async def enhance_audio_endpoint(file: UploadFile = File(...)):
             raise HTTPException(status_code=503, detail="音质提升模块未加载，请检查服务器日志")
 
         # 支持的输入格式
-        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac']
+        supported_input_formats = ['.mp3', '.wav', '.flac', '.ogg', '.aac', '.wma', '.m4a', '.ape', '.alac', '.mgg']
         
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in supported_input_formats:
@@ -717,4 +1130,4 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if __name__ == "__main__":
     import uvicorn
     print("[SERVER] 启动服务器...")
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
